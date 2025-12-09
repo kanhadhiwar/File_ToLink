@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>HLS Player</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body style="background:black;color:white;padding:20px;font-family:Arial">
+
+<h2>HLS Player</h2>
+<input id="url" placeholder="Paste .m3u8 URL" style="width:100%;padding:10px">
+<button onclick="loadV()" style="padding:10px;margin-top:10px">Load</button>
+
+<video id="v" controls style="width:100%;margin-top:20px"></video>
+
+<script>
+function loadV(){
+    let u = document.getElementById("url").value;
+    let v = document.getElementById("v");
+
+    if(Hls.isSupported()){
+        let h = new Hls();
+        h.loadSource(u);
+        h.attachMedia(v);
+    } else {
+        v.src = u;
+    }
+}
+</script>
+
+</body>
+</html>
