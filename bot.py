@@ -1,15 +1,18 @@
-import os, subprocess, shutil, asyncio
+import os, subprocess, shutil, asyncio, threading
+from flask import Flask
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN")
+app = Flask(__name__)
 
-# HLS output stored inside STATIC folder
+# Health check route (Render needs this)
+@app.route('/')
+def home():
+    return "Bot is running on Render Free Web Service!"
+
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 BASE_DIR = "/opt/render/project/src/static/hls/"
-
-# This must be your Render STATIC SITE URL
-BASE_URL = os.environ.get("BASE_URL", "https://YOUR-STATIC-SITE.onrender.com/hls/")
-
+BASE_URL = os.environ.get("BASE_URL")
 MAX_STORAGE_MB = 500
 
 
@@ -36,7 +39,7 @@ def cleanup_storage():
             total += size
             folders.append((size, folder))
 
-    if total / (1024*1024) > MAX_STORAGE_MB:
+    if total / (1024 * 1024) > MAX_STORAGE_MB:
         folders.sort(reverse=True)
         shutil.rmtree(folders[0][1], ignore_errors=True)
 
@@ -47,10 +50,10 @@ async def encode_with_progress(chat, input_path, out_dir, bot):
     cmd = f"""
     ffmpeg -y -i "{input_path}" -preset veryfast \
       -map v:0 -map a:0 -c:v:0 libx264 -b:v:0 3500k -s:v:0 1920x1080 -c:a:0 aac \
-      -map v:0 -map a:0 -c:v:1 libx264 -b:v:1 2000k -s:v:1 1280x720  -c:a:1 aac \
-      -map v:0 -map a:0 -c:v:2 libx264 -b:v:2 1000k -s:v:2 854x480   -c:a:2 aac \
-      -map v:0 -map a:0 -c:v:3 libx264 -b:v:3 600k  -s:v:3 640x360   -c:a:3 aac \
-      -map v:0 -map a:0 -c:v:4 libx264 -b:v:4 350k  -s:v:4 426x240   -c:a:4 aac \
+      -map v:0 -map a:0 -c:v:1 libx264 -b:v:1 2000k -s:v:1 1280x720 -c:a:1 aac \
+      -map v:0 -map a:0 -c:v:2 libx264 -b:v:2 1000k -s:v:2 854x480 -c:a:2 aac \
+      -map v:0 -map a:0 -c:v:3 libx264 -b:v:3 600k -s:v:3 640x360 -c:a:3 aac \
+      -map v:0 -map a:0 -c:v:4 libx264 -b:v:4 350k -s:v:4 426x240 -c:a:4 aac \
       -f hls -hls_time 6 -hls_playlist_type vod \
       -master_pl_name master.m3u8 \
       -var_stream_map "v:0,a:0 v:1,a:1 v:2,a:2 v:3,a:3 v:4,a:4" \
@@ -84,9 +87,7 @@ async def encode_with_progress(chat, input_path, out_dir, bot):
                     m = await bot.send_message(chat_id=chat, text=f"Encoding… {pct}%")
                     msg_id = m.message_id
                 else:
-                    await bot.edit_message_text(
-                        chat_id=chat, message_id=msg_id, text=f"Encoding… {pct}%"
-                    )
+                    await bot.edit_message_text(chat_id=chat, message_id=msg_id, text=f"Encoding… {pct}%")
 
     await proc.wait()
     return proc.returncode
@@ -106,21 +107,26 @@ async def process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgf = await context.bot.get_file(fid)
     await tgf.download_to_drive(input_path)
 
-    await msg.reply_text("⚙ Encoding started…")
+    await msg.reply_text("⚙ Starting encoding…")
 
     rc = await encode_with_progress(msg.chat_id, input_path, out_path, context.bot)
 
     if rc == 0:
         cleanup_storage()
-        await msg.reply_text(
-            f"🎉 HLS Ready!\n\n{BASE_URL}{fid}/master.m3u8"
-        )
+        await msg.reply_text(f"🎉 HLS Ready!\n\n{BASE_URL}{fid}/master.m3u8")
     else:
         await msg.reply_text("❌ Encoding failed.")
 
 
-if __name__ == "__main__":
-    os.makedirs(BASE_DIR, exist_ok=True)
+def start_bot():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.VIDEO | filters.Document.ALL, process))
     app.run_polling()
+
+
+# Run Telegram bot in background thread
+threading.Thread(target=start_bot).start()
+
+# Run Flask server (Render needs this)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=10000)
